@@ -1,7 +1,7 @@
 ---
 abstract: 'Run SNMP requests with Mojo::IOLoop'
 author:
-  - 'Jan Henning Thorsen - jhthorsen@cpan.org'
+  - 'Jan Henning Thorsen - C<jhthorsen@cpan.org>'
 build_requires:
   ExtUtils::MakeMaker: 6.36
 configure_requires:
@@ -32,4 +32,4 @@ resources:
   homepage: https://metacpan.org/release/Mojo-SNMP
   license: http://dev.perl.org/licenses/
   repository: git://github.com/jhthorsen/mojo-snmp.git
-version: 0.01
+version: 0.02
