@@ -32,4 +32,4 @@ resources:
   homepage: https://metacpan.org/release/Mojo-SNMP
   license: http://dev.perl.org/licenses/
   repository: git://github.com/jhthorsen/mojo-snmp.git
-version: 0.0201
+version: 0.03

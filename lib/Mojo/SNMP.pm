@@ -6,7 +6,7 @@ Mojo::SNMP - Run SNMP requests with Mojo::IOLoop
 
 =head1 VERSION
 
-0.0201
+0.03
 
 =head1 SYNOPSIS
 
@@ -15,7 +15,8 @@ Mojo::SNMP - Run SNMP requests with Mojo::IOLoop
     my @response;
 
     $snmp->on(response => sub {
-        my($snmp, $session) = @_;
+        my($snmp, $session, $args) = @_;
+        warn "Got response from $args->{hostname} on $args->{method}(@{$args->{request}})...\n";
         push @response, $session->var_bind_list;
     });
 
@@ -60,12 +61,46 @@ use Net::SNMP ();
 use Scalar::Util ();
 use constant DEBUG => $ENV{MOJO_SNMP_DEBUG} ? 1 : 0;
 
-our $VERSION = eval '0.0201';
+our $VERSION = eval '0.03';
 
 my %EXCLUDE = (
     v1 => [qw/ username authkey authpassword authprotocol privkey privpassword privprotocol /],
     v2c => [qw/ username authkey authpassword authprotocol privkey privpassword privprotocol /],
     v3 => [qw/ community /],
+);
+
+my %SNMP_METHOD = (
+    walk => sub {
+        my($session, %args) = @_;
+        my $base_oid = $args{varbindlist}[0];
+        my $last = $args{callback};
+        my($callback, $end, %tree, %types);
+
+        $end = sub {
+            $session->{_pdu}->var_bind_list(\%tree, \%types) if %tree;
+            $session->$last;
+        };
+
+        $callback = sub {
+            my($session) = @_;
+            my $res = $session->var_bind_list or return $end->();
+            my $types = $session->var_bind_types;
+            my @next;
+
+            for my $oid (keys %$res) {
+                if(Net::SNMP::oid_base_match($base_oid, $oid)) {
+                    $types{$oid} = $types->{$oid};
+                    $tree{$oid} = $res->{$oid};
+                    push @next, $oid;
+                }
+            }
+
+            return $end->() unless @next;
+            return $session->get_next_request(varbindlist => \@next, callback => $callback);
+        };
+
+        $session->get_next_request(varbindlist => [$base_oid], callback => $callback);
+    },
 );
 
 $Net::SNMP::DISPATCHER = $Net::SNMP::DISPATCHER; # avoid warning
@@ -75,11 +110,13 @@ $Net::SNMP::DISPATCHER = $Net::SNMP::DISPATCHER; # avoid warning
 =head2 error
 
     $self->on(error => sub {
-        my($self, $str, $session) = @_;
+        my($self, $str, $session, $args) = @_;
     });
 
 Emitted on errors which may occur. C<$session> is set if the error is a result
 of a L<Net::SNMP> method, such as L<get_request()|Net::SNMP/get_request>.
+
+See L</response> for C<$args> description.
 
 =head2 finish
 
@@ -92,11 +129,18 @@ Emitted when all hosts have completed.
 =head2 response
 
     $self->on(response => sub {
-        my($self, $session) = @_;
+        my($self, $session, $args) = @_;
     });
 
 Called each time a host responds. The C<$session> is the current L<Net::SNMP>
-object.
+object. C<$args> is a hash ref with the arguments given to L</prepare>, with
+some additional information:
+
+    {
+        method => $str, # get, get_next, ...
+        request => [$oid, ...],
+        # ...
+    }
 
 =head2 timeout
 
@@ -176,6 +220,7 @@ L<Net::SNMP>, but without "_request" at end:
     set
     get_bulk
     inform
+    walk
     ...
 
 The special hostname "*" will apply the given operation to all previously
@@ -192,6 +237,10 @@ Note: To get the C<OCTET_STRING> constant and friends you need to do:
 
     use Net::SNMP ':asn1';
 
+Note: "walk" is a custom method provided by this module. It will run
+C<get_next_request> until the next oid retrieved does not match the
+base OID or if the tree is exhausted.
+
 =back
 
 =cut
@@ -200,25 +249,27 @@ sub prepare {
     my $self = shift;
     my $hosts = ref $_[0] eq 'ARRAY' ? shift : [shift];
     my $args = ref $_[0] eq 'HASH' ? shift : {};
+    my %args = %$args;
 
     $hosts = [ sort keys %{ $self->_pool } ] if $hosts->[0] and $hosts->[0] eq '*';
 
-    defined $args->{$_} or $args->{$_} = $self->defaults->{$_} for keys %{ $self->defaults };
-    $args->{version} = $self->_normalize_version($args->{version} || '');
-    delete $args->{$_} for @{ $EXCLUDE{$args->{version}} };
+    defined $args{$_} or $args{$_} = $self->defaults->{$_} for keys %{ $self->defaults };
+    $args{version} = $self->_normalize_version($args{version} || '');
+    delete $args{$_} for @{ $EXCLUDE{$args{version}} };
+    delete $args{stash};
 
     HOST:
     for my $key (@$hosts) {
         my($host) = $key =~ /^([^|]+)/;
-        local $args->{hostname} = $host;
-        my $key = $key eq $host ? $self->_calculate_pool_key($args) : $key;
-        $self->_pool->{$key} ||= $self->_new_session($args) or next HOST;
+        local $args{hostname} = $host;
+        my $key = $key eq $host ? $self->_calculate_pool_key(\%args) : $key;
+        $self->_pool->{$key} ||= $self->_new_session(\%args) or next HOST;
 
         local @_ = @_;
         while(@_) {
             my $method = shift;
             my $oid = ref $_[0] eq 'ARRAY' ? shift : [shift];
-            push @{ $self->_queue }, [ $key, "$method\_request", $oid ]
+            push @{ $self->_queue }, [ $key, $method, $oid, $args ]
         }
     }
 
@@ -248,25 +299,26 @@ sub _new_session {
 sub _prepare_request {
     my $self = shift;
     my $item = shift @{ $self->_queue } or return;
-    my($key, $method, $list) = @$item;
+    my($key, $method, $list, $args) = @$item;
     my $session = $self->_pool->{$key};
     my $success;
 
     # dispatch to our mojo based dispatcher
-    local $Net::SNMP::DISPATCHER = $self->_dispatcher;
-
+    $Net::SNMP::DISPATCHER = $self->_dispatcher;
     warn "[SNMP] >>> $key $method(@$list)\n" if DEBUG;
     Scalar::Util::weaken($self);
+    $method = $SNMP_METHOD{$method} || "$method\_request";
     $success = $session->$method(
         varbindlist => $list,
         callback => sub {
+            local @$args{qw/ method request /} = @$item[1, 2];
             if($_[0]->var_bind_list) {
                 warn "[SNMP] <<< $key $method(@$list)\n" if DEBUG;
-                $self->emit_safe(response => $_[0]);
+                $self->emit_safe(response => $_[0], $args);
             }
             else {
                 warn "[SNMP] <<< $key @{[$_[0]->error]}\n" if DEBUG;
-                $self->emit_safe(error => $_[0]->error, $_[0]);
+                $self->emit_safe(error => $_[0]->error, $_[0], $args);
             }
             $self->_prepare_request;
             $self->_finish unless $self->_dispatcher->connections;
@@ -344,5 +396,7 @@ Jan Henning Thorsen - C<jhthorsen@cpan.org>
 Joshua Keroes - C<joshua@cpan.org>
 
 =cut
+
+1;
 
 1;

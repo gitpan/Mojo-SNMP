@@ -23,4 +23,4 @@ requires:
   Mojolicious: 3.38
   Net::SNMP: 0
   Scalar::Util: 1.2
-version: 0.0201
+version: 0.03
