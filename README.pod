@@ -6,7 +6,7 @@ Mojo::SNMP - Run SNMP requests with Mojo::IOLoop
 
 =head1 VERSION
 
-0.0301
+0.04
 
 =head1 SYNOPSIS
 
@@ -52,6 +52,34 @@ called L<SNMP::Effective>. Reason for the rewrite is that I'm using the
 framework L<Mojolicious> which includes an awesome IO loop which allow me to
 do cool stuff inside my web server.
 
+=head1 CUSTOM SNMP REQUEST METHODS
+
+L<Net::SNMP> provide methods to retrieve data from the SNMP agent, such as
+L<get_next()|Net::SNMP/get_next>. It is possible to add custom methods if
+you find yourself doing the same complicated logic over and over again.
+Such methods can be added using L</add_custom_request_method>.
+
+There are two custom methods bundled to this package:
+
+=over 4
+
+=item * bulk_walk
+
+This method will run C<get_bulk_request> until it receives an oid which does
+not match the base OID. maxrepetitions is set to 10 by default, but could be
+overrided by maxrepetitions inside C<%args>.
+
+Example:
+
+  $self->prepare('192.168.0.1' => { maxrepetitions => 25 }, bulk_walk => [$oid, ...]);
+
+=item * walk
+
+This method will run C<get_next_request> until the next oid retrieved does
+not match the base OID or if the tree is exhausted.
+
+=back
+
 =cut
 
 use Mojo::Base 'Mojo::EventEmitter';
@@ -60,48 +88,81 @@ use Mojo::SNMP::Dispatcher;
 use Net::SNMP ();
 use Scalar::Util ();
 use constant DEBUG => $ENV{MOJO_SNMP_DEBUG} ? 1 : 0;
+use constant MAXREPETITIONS => 10;
 
-our $VERSION = '0.0301';
+our $VERSION = '0.04';
 
+my @EXCLUDE_METHOD_ARGS = qw( maxrepetitions );
 my %EXCLUDE = (
   v1 => [qw/ username authkey authpassword authprotocol privkey privpassword privprotocol /],
   v2c => [qw/ username authkey authpassword authprotocol privkey privpassword privprotocol /],
   v3 => [qw/ community /],
 );
 
-my %SNMP_METHOD = (
-  walk => sub {
-    my($session, %args) = @_;
-    my $base_oid = $args{varbindlist}[0];
-    my $last = $args{callback};
-    my($callback, $end, %tree, %types);
+my %SNMP_METHOD;
+__PACKAGE__->add_custom_request_method(bulk_walk => sub {
+  my($session, %args) = @_;
+  my $base_oid = $args{varbindlist}[0];
+  my $last = $args{callback};
+  my $maxrepetitions = $args{maxrepetitions} || MAXREPETITIONS;
+  my($callback, $end, %tree, %types);
 
-    $end = sub {
-      $session->{_pdu}->var_bind_list(\%tree, \%types) if %tree;
-      $session->$last;
-    };
+  $end = sub {
+    $session->{_pdu}->var_bind_list(\%tree, \%types) if %tree;
+    $session->$last;
+  };
 
-    $callback = sub {
+  $callback = sub {
       my($session) = @_;
       my $res = $session->var_bind_list or return $end->();
+      my @sortres = $session->var_bind_names() or return $end->();
       my $types = $session->var_bind_types;
-      my @next;
+      my $next = $sortres[-1];
 
-      for my $oid (keys %$res) {
-        if(Net::SNMP::oid_base_match($base_oid, $oid)) {
+      for my $oid (@sortres) {
+          return $end->() unless Net::SNMP::oid_base_match($base_oid, $oid);
           $types{$oid} = $types->{$oid};
           $tree{$oid} = $res->{$oid};
-          push @next, $oid;
-        }
       }
 
-      return $end->() unless @next;
-      return $session->get_next_request(varbindlist => \@next, callback => $callback);
-    };
+      return $end->() unless $next;
+      return $session->get_bulk_request(maxrepetitions => $maxrepetitions, varbindlist => [$next], callback => $callback);
+  };
 
-    $session->get_next_request(varbindlist => [$base_oid], callback => $callback);
-  },
-);
+  $session->get_bulk_request(maxrepetitions => $maxrepetitions, varbindlist => [$base_oid], callback => $callback);
+});
+
+__PACKAGE__->add_custom_request_method(walk => sub {
+  my($session, %args) = @_;
+  my $base_oid = $args{varbindlist}[0];
+  my $last = $args{callback};
+  my($callback, $end, %tree, %types);
+
+  $end = sub {
+    $session->{_pdu}->var_bind_list(\%tree, \%types) if %tree;
+    $session->$last;
+  };
+
+  $callback = sub {
+    my($session) = @_;
+    my $res = $session->var_bind_list or return $end->();
+    my $types = $session->var_bind_types;
+    my @next;
+
+    for my $oid (keys %$res) {
+      if(Net::SNMP::oid_base_match($base_oid, $oid)) {
+        $types{$oid} = $types->{$oid};
+        $tree{$oid} = $res->{$oid};
+        push @next, $oid;
+      }
+    }
+
+    return $end->() unless @next;
+    return $session->get_next_request(varbindlist => \@next, callback => $callback);
+  };
+
+  $session->get_next_request(varbindlist => [$base_oid], callback => $callback);
+});
 
 $Net::SNMP::DISPATCHER = $Net::SNMP::DISPATCHER; # avoid warning
 
@@ -221,10 +282,13 @@ L<Net::SNMP>, but without "_request" at end:
   get_bulk
   inform
   walk
+  bulk_walk
   ...
 
 The special hostname "*" will apply the given operation to all previously
 defined hosts.
+
+=back
 
 Examples:
 
@@ -236,12 +300,6 @@ Examples:
 Note: To get the C<OCTET_STRING> constant and friends you need to do:
 
   use Net::SNMP ':asn1';
-
-Note: "walk" is a custom method provided by this module. It will run
-C<get_next_request> until the next oid retrieved does not match the
-base OID or if the tree is exhausted.
-
-=back
 
 =cut
 
@@ -255,7 +313,7 @@ sub prepare {
 
   defined $args{$_} or $args{$_} = $self->defaults->{$_} for keys %{ $self->defaults };
   $args{version} = $self->_normalize_version($args{version} || '');
-  delete $args{$_} for @{ $EXCLUDE{$args{version}} };
+  delete $args{$_} for @{ $EXCLUDE{$args{version}} }, @EXCLUDE_METHOD_ARGS;
   delete $args{stash};
 
   HOST:
@@ -309,6 +367,8 @@ sub _prepare_request {
   Scalar::Util::weaken($self);
   $method = $SNMP_METHOD{$method} || "$method\_request";
   $success = $session->$method(
+    $method =~ /bulk/ ? (maxrepetitions => $args->{maxrepetitions} || MAXREPETITIONS) : (),
+    ref $method ? (%$args) : (),
     varbindlist => $list,
     callback => sub {
       local @$args{qw/ method request /} = @$item[1, 2];
@@ -382,6 +442,29 @@ sub wait {
   $self;
 }
 
+=head2 add_custom_request_method
+
+  $self->add_custom_request_method(name => sub {
+    my($session, %args) = @_;
+    # do custom stuff..
+  });
+
+This method can be used to add custom L<Net::SNMP> request methods. See the
+source code for an example on how to do "walk".
+
+NOTE: This method will also replace any method, meaning the code below will
+call the custom callback instead of L<Net::SNMP/get_next_request>.
+
+  $self->add_custom_request_method(get_next => $custom_callback);
+
+=cut
+
+sub add_custom_request_method {
+  my($class, $name, $cb) = @_;
+  $SNMP_METHOD{$name} = $cb;
+  $class;
+}
+
 =head1 COPYRIGHT & LICENSE
 
 This library is free software. You can redistribute it and/or modify
@@ -392,6 +475,8 @@ it under the same terms as Perl itself.
 Jan Henning Thorsen - C<jhthorsen@cpan.org>
 
 Joshua Keroes - C<joshua@cpan.org>
+
+Espen Tallaksen
 
 =cut
 
