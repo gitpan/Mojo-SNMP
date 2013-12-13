@@ -4,7 +4,7 @@
       "Jan Henning Thorsen <jhthorsen@cpan.org>"
    ],
    "dynamic_config" : 1,
-   "generated_by" : "ExtUtils::MakeMaker version 6.66, CPAN::Meta::Converter version 2.131560",
+   "generated_by" : "ExtUtils::MakeMaker version 6.66, CPAN::Meta::Converter version 2.120921",
    "license" : [
       "perl_5"
    ],
@@ -21,7 +21,9 @@
    },
    "prereqs" : {
       "build" : {
-         "requires" : {}
+         "requires" : {
+            "Test::More" : "0.90"
+         }
       },
       "configure" : {
          "requires" : {
@@ -30,37 +32,15 @@
       },
       "runtime" : {
          "requires" : {
-            "EV" : "4.11",
-            "IO::Socket::IP" : "0.22",
-            "IO::Socket::SSL" : "1.94",
-            "Mojo::Base" : "0",
-            "Mojo::EventEmitter" : "0",
-            "Mojo::Exception" : "0",
-            "Mojo::IOLoop" : "0",
-            "Mojo::IOLoop::Client" : "0",
-            "Mojo::IOLoop::Delay" : "0",
-            "Mojo::IOLoop::Server" : "0",
-            "Mojo::IOLoop::Stream" : "0",
-            "Mojo::Loader" : "0",
-            "Mojo::Reactor" : "0",
-            "Mojo::Reactor::EV" : "0",
-            "Mojo::Reactor::Poll" : "0",
-            "Mojo::Util" : "0",
-            "Net::SNMP::Message" : "0",
-            "Net::SNMP::MessageProcessing" : "0",
-            "Net::SNMP::PDU" : "0",
-            "Net::SNMP::Transport" : "0",
-            "Net::SSLeay" : "1.48",
-            "URI" : "1.60",
-            "URI::Escape" : "3.31",
-            "common::sense" : "3.6"
+            "Mojolicious" : "4.30",
+            "Net::SNMP" : "0"
          }
       }
    },
    "release_status" : "stable",
    "resources" : {
       "bugtracker" : {
-         "web" : "http://rt.cpan.org/NoAuth/Bugs.html?Dist=Mojo-SNMP"
+         "web" : "https://github.com/jhthorsen/mojo-snmp/issues"
       },
       "homepage" : "https://metacpan.org/release/Mojo-SNMP",
       "license" : [
@@ -70,5 +50,5 @@
          "url" : "https://github.com/jhthorsen/mojo-snmp"
       }
    },
-   "version" : "0.04"
+   "version" : "0.05"
 }
