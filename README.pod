@@ -6,7 +6,7 @@ Mojo::SNMP - Run SNMP requests with Mojo::IOLoop
 
 =head1 VERSION
 
-0.0501
+0.06
 
 =head1 SYNOPSIS
 
@@ -90,7 +90,7 @@ use Scalar::Util ();
 use constant DEBUG => $ENV{MOJO_SNMP_DEBUG} ? 1 : 0;
 use constant MAXREPETITIONS => 10;
 
-our $VERSION = '0.0501';
+our $VERSION = '0.06';
 
 my @EXCLUDE_METHOD_ARGS = qw( maxrepetitions );
 my %EXCLUDE = (
@@ -110,6 +110,7 @@ __PACKAGE__->add_custom_request_method(bulk_walk => sub {
   $end = sub {
     $session->{_pdu}->var_bind_list(\%tree, \%types) if %tree;
     $session->$last;
+    $end = $callback = undef;
   };
 
   $callback = sub {
@@ -141,6 +142,7 @@ __PACKAGE__->add_custom_request_method(walk => sub {
   $end = sub {
     $session->{_pdu}->var_bind_list(\%tree, \%types) if %tree;
     $session->$last;
+    $end = $callback = undef;
   };
 
   $callback = sub {
