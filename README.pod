@@ -6,7 +6,7 @@ Mojo::SNMP - Run SNMP requests with Mojo::IOLoop
 
 =head1 VERSION
 
-0.06
+0.07
 
 =head1 SYNOPSIS
 
@@ -90,7 +90,7 @@ use Scalar::Util ();
 use constant DEBUG => $ENV{MOJO_SNMP_DEBUG} ? 1 : 0;
 use constant MAXREPETITIONS => 10;
 
-our $VERSION = '0.06';
+our $VERSION = '0.07';
 
 my @EXCLUDE_METHOD_ARGS = qw( maxrepetitions );
 my %EXCLUDE = (
@@ -441,11 +441,11 @@ sub _prepare_request {
       local @$args{qw/ method request /} = @$item[1, 2];
       if($_[0]->var_bind_list) {
         warn "[SNMP] <<< $key $method(@$list)\n" if DEBUG;
-        $cb ? $self->$cb('', $_[0]) : $self->emit_safe(response => $_[0], $args);
+        $cb ? $self->$cb('', $_[0]) : $self->emit(response => $_[0], $args);
       }
       else {
         warn "[SNMP] <<< $key @{[$_[0]->error]}\n" if DEBUG;
-        $cb ? $self->$cb($_[0]->error, undef) : $self->emit_safe(error => $_[0]->error, $_[0], $args);
+        $cb ? $self->$cb($_[0]->error, undef) : $self->emit(error => $_[0]->error, $_[0], $args);
       }
       $self->_prepare_request;
       $self->_finish unless $self->_dispatcher->connections;
@@ -453,7 +453,7 @@ sub _prepare_request {
   );
 
   return ++$self->{_requests} if $success;
-  $self->emit_safe(error => $session->error, $session);
+  $self->emit(error => $session->error, $session);
   return $self->{_requests} || '0e0';
 }
 
@@ -474,7 +474,7 @@ sub _setup {
   $tid = $self->ioloop->timer($timeout => sub {
     warn "[SNMP] Timeout\n" if DEBUG;
     $self->ioloop->remove($tid);
-    $self->emit_safe('timeout');
+    $self->emit('timeout');
     $self->{_setup} = 0;
   });
 }
