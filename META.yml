@@ -24,4 +24,4 @@ resources:
   bugtracker: https://github.com/jhthorsen/mojo-snmp/issues
   homepage: https://github.com/jhthorsen/mojo-snmp
   repository: https://github.com/jhthorsen/mojo-snmp.git
-version: 0.09
+version: 0.10

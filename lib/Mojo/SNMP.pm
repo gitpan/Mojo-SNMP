@@ -6,7 +6,7 @@ Mojo::SNMP - Run SNMP requests with Mojo::IOLoop
 
 =head1 VERSION
 
-0.09
+0.10
 
 =head1 SYNOPSIS
 
@@ -90,8 +90,9 @@ use Scalar::Util ();
 use constant DEBUG => $ENV{MOJO_SNMP_DEBUG} ? 1 : 0;
 use constant MAXREPETITIONS => 10;
 
-our $VERSION = '0.09';
+our $VERSION = '0.10';
 
+my $DISPATCHER;
 my @EXCLUDE_METHOD_ARGS = qw( maxrepetitions );
 my %EXCLUDE             = (
   v1  => [qw( username authkey authpassword authprotocol privkey privpassword privprotocol )],
@@ -252,7 +253,7 @@ has ioloop         => sub { Mojo::IOLoop->singleton };
 
 # these attributes are experimental and therefore not exposed. Let me know if
 # you use them...
-has _dispatcher => sub { Mojo::SNMP::Dispatcher->new(ioloop => $_[0]->ioloop) };
+has _dispatcher => sub { $DISPATCHER ||= Mojo::SNMP::Dispatcher->new(ioloop => shift->ioloop) };
 has _pool       => sub { +{} };
 has _queue      => sub { +[] };
 
